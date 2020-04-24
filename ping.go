@@ -1,3 +1,6 @@
+/*Written by Ethan Hampton <ethohampton@gmail.com>, April 2020 as a part of my Cloudflare Internship Application
+ *The original prompt can be seen at https://github.com/cloudflare-internship-2020/internship-application-systems
+ */
 package main
 
 import (

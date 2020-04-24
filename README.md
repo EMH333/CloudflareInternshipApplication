@@ -1,6 +1,8 @@
-# Cloudflare Intern Ping Application
+# Cloudflare Internship Application: Ping Application
 
 This is a simple application built in Go designed to ping a host via ICMP. This program supports both IPv4 and IPv6. It has options for Time To Live and the interval between sending packets.
+
+The original prompt can be found here: [https://github.com/cloudflare-internship-2020/internship-application-systems](https://github.com/cloudflare-internship-2020/internship-application-systems)
 
 ## Usage
 
