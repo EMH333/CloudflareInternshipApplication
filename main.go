@@ -25,6 +25,10 @@ type ReturnData struct {
 }
 
 func main() {
+	/*
+		c.IPv4PacketConn().SetTTL(64) // for ipv4
+		c.IPv6PacketConn().HopLimit(64) // for ipv6
+	*/
 	c, err := icmp.ListenPacket("ip4:icmp", "")
 	if err != nil {
 		log.Println("Some sort of error here")
