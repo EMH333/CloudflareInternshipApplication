@@ -6,6 +6,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/ipv4"
@@ -25,11 +28,12 @@ const defaultInterval = 1
 //ReturnData data passed from ICMP listener to output
 type ReturnData struct {
 	ID    int
-	delay int64 // in nanoseconds for future use
+	delay int64 // in nanoseconds
 }
 
 func main() {
-	log.SetFlags(log.Ltime | log.Lmicroseconds) //TODO remove time code from logging
+	log.SetFlags(0) //remove timecodes from loggin
+
 	ttl := flag.Int("ttl", defaultTTL, "Set TTL of ping requests")
 	interval := flag.Int("interval", defaultInterval, "Set interval between ping requests in seconds")
 	flag.Parse()
@@ -54,7 +58,7 @@ func main() {
 		}
 	}
 
-	log.Printf("Using address: %s", dest.IP.String())
+	log.Printf("PINGing address %s", dest.IP.String())
 
 	//figure out if ipv6 or ipv4
 	isIPv6 := dest.IP.To4() == nil
@@ -63,35 +67,46 @@ func main() {
 	if isIPv6 {
 		connString = "ip6:ipv6-icmp"
 	}
-
+	//create connection to send and receive on
 	c, err := icmp.ListenPacket(connString, "")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer c.Close()
 
+	//set ttl for connection
 	if isIPv6 {
 		c.IPv6PacketConn().SetHopLimit(*ttl)
 	} else {
 		c.IPv4PacketConn().SetTTL(*ttl)
 	}
 
-	//start of actual technical stuff TODO
+	//start listening
 	listenOutput := make(chan ReturnData)
 	go receive(c, isIPv6, listenOutput)
 
-	seq := 1
-	messagesRecived := 0
+	//used to send packets at a constant interval
 	//have to work around weird golang time syntax for multipling an interval by a constants
 	tick := time.Tick(time.Duration(*interval) * time.Second)
 
+	//watch for quit events to print out session stats
+	quit := make(chan os.Signal, 2)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	startTime := time.Now()
+	seq := 1
+	messagesRecived := 0
 	for {
 		select {
+		case <-quit:
+			log.Printf("\n\nTranmited %d packets, %d received, %0.1f%% packet loss, total time %dms",
+				seq-1, messagesRecived, (float32(seq-1-messagesRecived)/float32(seq-1))*100, time.Now().Sub(startTime).Nanoseconds()/nanoToMilli)
+			return
 		case data := <-listenOutput:
 			if data.ID == -1 {
 				log.Println("Time to live exceeded")
 			} else {
-				log.Printf("Repy received: icmp_seq=%d time=%0.1f ms", data.ID, data.delay/nanoToMilli)
+				log.Printf("Repy received: icmp_seq=%d time=%0.2f ms", data.ID, float64(data.delay)/float64(nanoToMilli))
 			}
 			messagesRecived++
 			break
@@ -103,6 +118,7 @@ func main() {
 	}
 }
 
+//a goroutine to receive ICMP packets and output basic information via the output ReturnData channel
 func receive(c *icmp.PacketConn, isIPv6 bool, output chan ReturnData) {
 	var proto int
 	if isIPv6 {
@@ -114,7 +130,10 @@ func receive(c *icmp.PacketConn, isIPv6 bool, output chan ReturnData) {
 
 	for {
 		n, _, err := c.ReadFrom(rb)
-		if err != nil {
+		//this happens when quiting program just catch it here, otherwise must actually be error
+		if err != nil && strings.Contains(err.Error(), "closed network connection") {
+			return
+		} else if err != nil {
 			log.Fatal(err)
 		}
 
@@ -144,8 +163,8 @@ func receive(c *icmp.PacketConn, isIPv6 bool, output chan ReturnData) {
 	}
 }
 
+//send a echo packet to the destination with a given sequence number, encoding the current time in the body
 func send(c *icmp.PacketConn, dest net.Addr, seqNum int, isIPv6 bool) {
-
 	t := time.Now().UnixNano()
 	body := make([]byte, 8)
 	binary.LittleEndian.PutUint64(body, uint64(t))
