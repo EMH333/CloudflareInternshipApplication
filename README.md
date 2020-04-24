@@ -24,7 +24,7 @@ After exiting, the application will display number of packets sent, number of pa
 ## Command Line Options 
 
 - -interval integer  
- - Set interval between ping requests in seconds (default 1)  
+  - Set interval between ping requests in seconds (default 1)  
 - -ttl integer  
   - Set TTL of ping requests (default 64)  
   
