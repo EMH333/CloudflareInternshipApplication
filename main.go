@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"flag"
 	"log"
 	"net"
 	"os"
@@ -18,6 +19,9 @@ const ipv4MagicNumber = 1
 const ipv6MagicNumber = 58
 const nanoToMilli = 1000000
 
+const defaultTTL = 64
+const defaultInterval = 1
+
 //ReturnData data passed from ICMP listener to output
 type ReturnData struct {
 	ID    int
@@ -25,36 +29,74 @@ type ReturnData struct {
 }
 
 func main() {
-	/*
-		c.IPv4PacketConn().SetTTL(64) // for ipv4
-		c.IPv6PacketConn().HopLimit(64) // for ipv6
-	*/
-	c, err := icmp.ListenPacket("ip4:icmp", "")
+	log.SetFlags(log.Ltime | log.Lmicroseconds) //TODO remove time code from logging
+	ttl := flag.Int("ttl", defaultTTL, "Set TTL of ping requests")
+	interval := flag.Int("interval", defaultInterval, "Set interval between ping requests in seconds")
+	debug := flag.Bool("debug", false, "TODO just for testing")
+	flag.Parse()
+
+	rawDestination := flag.Arg(0)
+	if rawDestination == "" {
+		log.Fatal("usage error: Destination address required")
+	}
+
+	var dest net.IPAddr
+
+	//now figure out if destination is a host that needs resolving or a straight ip
+	hostIPs, err := net.LookupHost(rawDestination)
 	if err != nil {
-		log.Println("Some sort of error here")
+		log.Fatal(err)
+	} else {
+		rawIP := net.ParseIP(hostIPs[0])
+		if rawIP.String() != "" {
+			dest = net.IPAddr{IP: rawIP}
+		} else {
+			log.Fatal("Error parsing address")
+		}
+	}
+
+	log.Printf("Using address: %s", dest.IP.String())
+
+	//figure out if ipv6 or ipv4
+	isIPv6 := dest.IP.To4() == nil
+
+	connString := "ip4:icmp"
+	if isIPv6 {
+		connString = "ip6:ipv6-icmp"
+	}
+
+	c, err := icmp.ListenPacket(connString, "")
+	if err != nil {
 		log.Fatal(err)
 	}
 	defer c.Close()
 
-	log.Println("Starting receiver!")
+	if isIPv6 {
+		c.IPv6PacketConn().SetHopLimit(*ttl)
+	} else {
+		c.IPv4PacketConn().SetTTL(*ttl)
+	}
+
+	//TODO TODO FOR TESTING
+	if *debug {
+		return
+	}
+
+	//start of actual technical stuff TODO
 	listenOutput := make(chan ReturnData)
+	go receive(c, isIPv6, listenOutput)
 
 	seq := 1
-	dest := &net.IPAddr{IP: net.ParseIP("1.1.1.1")}
+	//have to work around weird golang time syntax for multipling an interval by a constants
+	tick := time.Tick(time.Duration(*interval) * time.Second)
 
-	//send(c, dest, seq, false)
-	//log.Println("Sent first")
-	go receive(c, false, listenOutput)
-
-	tick := time.Tick(time.Second)
-	var data ReturnData
 	for {
 		select {
-		case data = <-listenOutput:
+		case data := <-listenOutput:
 			log.Printf("Time between ping: %d", data.delay/nanoToMilli)
 			break
 		case <-tick:
-			send(c, dest, seq, false)
+			send(c, &dest, seq, isIPv6)
 			seq++
 			break
 		}
@@ -91,7 +133,7 @@ func receive(c *icmp.PacketConn, isIPv6 bool, output chan ReturnData) {
 			output <- ReturnData{ID: returnBody.ID, delay: returnTimeNano}
 		default:
 			log.Printf("got %+v; want echo reply", rm)
-		}
+		} //TODO accept expired requests
 	}
 }
 
